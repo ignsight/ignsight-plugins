@@ -3,7 +3,8 @@ import { agentById, agents } from "./agents/index.js";
 import { CaptureBuffer } from "./buffer.js";
 import { captureState } from "./capture.js";
 import { connectToken, pairWorkspace } from "./pair.js";
-import { hookEvents } from "./trace/canonical.js";
+import { finalize, hookEvents } from "./trace/canonical.js";
+import { instructionEvents } from "./trace/instructions.js";
 import { redact } from "./trace/redact.js";
 import { readUsage, transcriptBoundary } from "./trace/usage.js";
 import { OUT_OF_WORKSPACE, scopePayload } from "./trace/scope.js";
@@ -72,6 +73,10 @@ async function handle(agent, input, raw) {
         const pending = record.pending_tests ?? [];
         const testStart = pending.find((test) => test.id === id);
         const drafts = await hookEvents({ ...input, payload }, agent, pairing.root, cwd, { usage: usage.usage, testStart });
+        if (!record.instructions_captured) {
+            drafts.push(...(await instructionEvents(pairing.root)).map(finalize));
+            record.instructions_captured = true;
+        }
         if (usage.limited)
             drafts.push({ event_type: "capture.warning", actor: "system", payload: { code: "usage_read_limit", message: "Transcript usage exceeded the bounded read limit; usage was omitted." } });
         for (const draft of drafts) {
@@ -85,10 +90,11 @@ async function handle(agent, input, raw) {
             record.pending_tests = [];
         // The redacted, allowlisted payload rides along as raw, unless scoping withheld
         // content or the prompt was agent-started (its text is agent content, never evidence).
+        // Derived usage and instruction snapshots have no matching native raw event.
         const rawPayload = redact(payload);
         return input.promptOrigin === "host" || JSON.stringify(payload).includes(OUT_OF_WORKSPACE)
             ? drafts
-            : drafts.map((draft) => draft.event_type === "extension.used" ? draft : ({ ...draft, raw: { source_type: input.hookName, payload: rawPayload } }));
+            : drafts.map((draft) => (draft.event_type === "extension.used" || draft.event_type === "instructions.file") ? draft : ({ ...draft, raw: { source_type: input.hookName, payload: rawPayload } }));
     }, opening);
     // A full buffer still needs retrying on later hooks after an offline uploader exits.
     if (await buffer.bufferedCount())

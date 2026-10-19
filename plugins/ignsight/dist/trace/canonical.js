@@ -150,7 +150,7 @@ async function toolEnd({ input, agent, root, cwd, testStart }, failed) {
             } }];
 }
 /** Redact every string, turn scope markers into omissions, and attach the contract's redaction markers. */
-function finalize(draft) {
+export function finalize(draft) {
     const markers = [...draft.payload.redactions ?? []];
     const payload = clean(draft.payload, "", false, markers);
     if (markers.length)

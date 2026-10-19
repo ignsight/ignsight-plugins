@@ -183,7 +183,7 @@ function patchPaths(patch) {
 export function isSensitiveFile(path) {
     return sensitiveFile.test(sep === "/" ? path : path.replaceAll(sep, "/"));
 }
-function expandHome(path) {
+export function expandHome(path) {
     const home = /^(?:~|\$HOME|\$\{HOME\})(?=\/|$)/.exec(path);
     return home ? join(homedir(), path.slice(home[0].length)) : path;
 }

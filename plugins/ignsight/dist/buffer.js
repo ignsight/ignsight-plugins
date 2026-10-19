@@ -131,6 +131,8 @@ export class CaptureBuffer {
             if (!journal || typeof journal !== "object" || !("offset" in journal) || !("size" in journal) || !Number.isSafeInteger(journal.offset) || !Number.isSafeInteger(journal.size) || Number(journal.offset) <= 0 || Number(journal.size) < Number(journal.offset))
                 throw new Error("Invalid compaction journal");
         }
+        if (data.instructions_captured !== undefined && typeof data.instructions_captured !== "boolean")
+            throw new Error("Invalid instruction snapshot marker");
         if (data.transcript !== undefined && !validCursor(data.transcript))
             throw new Error("Invalid transcript cursor");
         if (data.pending_tests !== undefined && (!Array.isArray(data.pending_tests) || data.pending_tests.length > 128 || !data.pending_tests.every((item) => item !== null && typeof item === "object" && "id" in item && typeof item.id === "string" && item.id.length <= 255 && "runner" in item && typeof item.runner === "string" && item.runner.length <= 255 && "started_at" in item && Number.isSafeInteger(item.started_at) && Number(item.started_at) >= 0)))
