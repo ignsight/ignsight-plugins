@@ -10,7 +10,18 @@ import { credentialFile, credentialFor, refreshState } from "./capture.js";
 import { deleteSecret } from "./keychain.js";
 import { PRODUCER } from "./version.js";
 import { pairingDirectory, readState, updateState } from "./workspace.js";
-const UPLOAD_GRACE_MS = 120_000;
+// Mirrors UPLOAD_GRACE in apps/api/src/interview_api/candidates/access_window.py.
+// Fifteen minutes gives the detached uploader (a backoff round, then a
+// RETRY_INTERVAL_MS pause) about ten rounds after the deadline: enough to ride
+// out an API restart or a network drop of several minutes, while the reviewer
+// waits at most this long for the final record. Only evidence recorded before
+// the end uploads in this window.
+export const UPLOAD_GRACE_MS = 15 * 60_000;
+// Pause between rounds of the detached uploader while the API stays unreachable.
+export const RETRY_INTERVAL_MS = 60_000;
+// Rounds the detached uploader retries when the attempt end is unknown (no grace
+// to bound it): about as long as the grace. The next hook starts a new uploader.
+export const MAX_UNKNOWN_END_ROUNDS = UPLOAD_GRACE_MS / RETRY_INTERVAL_MS;
 /** Drain through upload grace at expiry, then retain only pairing and status metadata. */
 export async function flushPairing(pairing, options = {}) {
     const now = options.now ?? Date.now;
@@ -143,12 +154,11 @@ async function drainPairing(pairing, options = {}) {
                 const remaining = end + UPLOAD_GRACE_MS - now;
                 if (remaining <= 0)
                     return "stopped";
-                // Active uploads yield after maxAttempts. At expiry, keep retrying
-                // while a known grace deadline still permits the buffered evidence.
-                const withinGrace = Number.isFinite(remaining) && (latest.state === "expired" || now >= end);
-                if (++failures >= maxAttempts && !withinGrace) {
-                    await updateState(pairing.key, { last_error: "Upload failed after retries; events stay buffered and are retried on the next hook." });
-                    return "gave-up";
+                // Yield after maxAttempts; the detached uploader retries on its timer
+                // until the buffer drains or the grace ends.
+                if (++failures >= maxAttempts) {
+                    await updateState(pairing.key, { last_error: "Upload failed after retries; events stay buffered and are retried automatically." });
+                    return "retry";
                 }
                 await sleep(Math.min(remaining, 30_000, 1_000 * 2 ** (failures - 1)));
             }
@@ -171,10 +181,16 @@ function batchOf(events, limit) {
  * Upload in this process while holding the pairing's upload lock. Returns
  * without uploading when another uploader holds it. After releasing, re-checks
  * the buffer: a hook may have appended while its own uploader found the lock taken.
+ * With `retryEveryMs` (the detached uploader), an unreachable API is retried on
+ * that timer instead of waiting for the next hook, until the buffer drains or
+ * the pairing stops (at the latest when the upload grace ends, or after
+ * MAX_UNKNOWN_END_ROUNDS when the end is unknown). The lock is released while
+ * waiting, so a newer uploader may take over and this one exits.
  */
 export async function uploadWithLock(pairing, options = {}) {
     const lock = join(pairingDirectory(pairing.key), "upload.pid");
     const buffer = new CaptureBuffer(pairingDirectory(pairing.key));
+    let unknownEndRounds = 0;
     for (;;) {
         if (!await withFileLock(`${lock}.start`, () => acquire(lock)))
             return;
@@ -184,6 +200,13 @@ export async function uploadWithLock(pairing, options = {}) {
         }
         finally {
             await unlink(lock).catch(() => { });
+        }
+        if (result === "retry" && options.retryEveryMs !== undefined) {
+            // flushPairing already refreshed the state; an end still unknown has no grace to stop at.
+            if ((await readState(pairing.key)).expires_at === null && ++unknownEndRounds >= MAX_UNKNOWN_END_ROUNDS)
+                return;
+            await (options.sleep ?? sleepFor)(options.retryEveryMs);
+            continue;
         }
         if (result !== "done" || !await buffer.bufferedCount())
             return;

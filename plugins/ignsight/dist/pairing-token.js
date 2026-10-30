@@ -1,10 +1,10 @@
 // The candidate portal shows one opaque pairing token per producer instead of a
 // separate API URL and code: `ignsight1_` + base64url(JSON {api, producer, code}).
-// The portal (apps/web) encodes it; the capture client and the extension decode it.
+// The portal (apps/web) encodes it; the capture client decodes it.
 // The code inside is single use and expires within five minutes.
 import { agents } from "./agents/index.js";
 const PREFIX = "ignsight1_";
-const producers = new Set([...agents.map((agent) => agent.producer), "extension"]);
+const producers = new Set(agents.map((agent) => agent.producer));
 /** Decode and validate a pairing token. Throws a candidate-readable error. */
 export function parsePairingToken(token) {
     const text = token.trim();

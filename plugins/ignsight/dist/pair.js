@@ -25,8 +25,6 @@ export function connectToken(prompt, commands) {
  */
 export async function pairWorkspace(token, directory, host) {
     const { api, producer, code } = parsePairingToken(token);
-    if (producer === "extension")
-        throw new Error("This code is for the browser extension. Paste it into the extension popup instead.");
     // Exchanging another agent's code would also revoke that agent's working credential.
     if (host && producer !== host)
         throw new Error(`This code is for ${displayName(producer)}, not ${displayName(host)}. Copy the ${displayName(host)} code from the candidate portal. The code was not used.`);
@@ -67,7 +65,7 @@ export async function pairWorkspace(token, directory, host) {
     // The first status call is what tells the portal this producer is connected.
     const state = await refreshState(pairing, 5_000).catch(() => null);
     return {
-        lines: [`Paired ${displayName(producer)} in ${root} with attempt ${pairing.attempt_id}.`, describeState(state?.state ?? null)],
+        lines: [describeState(state?.state ?? null), `Workspace: ${root}`, `Attempt: ${pairing.attempt_id}`],
         warning: pairing.credential_storage === "file"
             ? "Warning: no OS keychain was available, so the credential is stored in an owner-only file. The reviewer will see a capture warning."
             : null,
@@ -75,11 +73,11 @@ export async function pairWorkspace(token, directory, host) {
 }
 export function describeState(state, endedAt = null) {
     switch (state) {
-        case "active": return "capturing";
-        case "waiting-for-start": return "waiting for the test to start";
-        case "paired": return "paired";
+        case "active": return "Connected to Ignsight. Capture is active for your assessment.";
+        case "waiting-for-start": return "Connected to Ignsight. Waiting for your assessment to start. Capture has not started.";
+        case "paired": return "Connected to Ignsight. Capture starts when your assessment starts.";
         case "expired":
-        case "ended": return `ended at ${endedAt ?? "unknown time"}`;
-        default: return "unknown: the API could not be reached. Nothing is captured until it reports the attempt active.";
+        case "ended": return `Assessment ended at ${endedAt ?? "unknown time"}. Capture has stopped.`;
+        default: return "Connected to Ignsight. Capture status could not be confirmed because the API could not be reached. Nothing is captured until it reports the assessment active.";
     }
 }

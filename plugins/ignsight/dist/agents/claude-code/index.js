@@ -172,5 +172,5 @@ export const claudeCode = {
             },
         };
     },
-    blockPrompt: (message) => ({ decision: "block", reason: message }),
+    blockPrompt: (message) => ({ continue: false, stopReason: message }),
 };

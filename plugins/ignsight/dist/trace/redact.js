@@ -11,9 +11,11 @@ export const REDACTED = "[REDACTED]";
 // Names whose values are secrets: `DB_PASSWORD=`, `"api_key":`, `OPENAI_KEY:`, `x-auth-token`.
 // Short words only count as whole name segments, so `monkey` and `author` stay visible.
 const sensitiveName = /api[_.-]?key|token|secret|passw(?:or)?d|passphrase|authorization|cookie|credential|private[_.-]?key|access[_.-]?key|(?:^|[_.-])(?:key|pass|auth|dsn)(?:$|[_.-])/i;
-/** Whether an object key or assignment name marks its value as secret. */
+// Only these vendor names identify accounts; generic account_id and org_id stay visible.
+const vendorAccountNames = new Set(["organizationUuid", "organization_uuid", "accountUuid", "account_uuid", "chatgpt_account_id"]);
+/** Whether an object key or assignment name marks its value for redaction. */
 export function isSensitiveName(name) {
-    return sensitiveName.test(name);
+    return sensitiveName.test(name) || vendorAccountNames.has(name);
 }
 // A quoted value may be unterminated; its closing quote is optional.
 const valuePattern = String.raw `(?:"[^"\n]{0,${SCAN_LENGTH}}"?|'[^'\n]{0,${SCAN_LENGTH}}'?|[^\s"']{1,${SCAN_LENGTH}})`;
@@ -27,6 +29,7 @@ const rules = [
     [/\bxox[abposr]-[A-Za-z0-9-]{10,}/g, REDACTED], // Slack
     [/\bAIza[0-9A-Za-z_-]{30,}/g, REDACTED], // Google API key
     [/\b(?:AKIA|ASIA)[0-9A-Z]{16}\b/g, REDACTED], // AWS access key id
+    [/\b(?:org-|user-|proj_)[A-Za-z0-9]{24}\b/g, REDACTED], // Vendor organization, user and project IDs
     [/\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]*/g, REDACTED], // JWT
     [/\bBearer\s+[A-Za-z0-9._~+/=-]+/g, `Bearer ${REDACTED}`],
     // URL userinfo passwords, including DSNs: keep scheme, user and host for context.
