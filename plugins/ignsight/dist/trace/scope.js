@@ -1,10 +1,11 @@
+import { execFile } from "node:child_process";
 import { glob, realpath } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { isInside } from "../workspace.js";
 import { isObject } from "./event.js";
 // Tool content is captured only for files inside the workspace root (decision D3)
-// and never for credential files. A scoped-out event is kept; its file content
+// and never for credential or gitignored files. A scoped-out event is kept; its file content
 // and tool output are replaced by a marker.
 export const OUT_OF_WORKSPACE = "[OUT_OF_WORKSPACE]";
 export const SENSITIVE_FILE = "[REDACTED_SENSITIVE_FILE]";
@@ -19,7 +20,7 @@ const locatorKeys = new Set([...pathKeys, ...commandKeys, "workdir", "pattern"])
 const MAX_PATH_CHECKS = 1_024;
 // .env*, *.env, SSH keys, *.pem, *.key, auth rc files, and cloud credential stores.
 const sensitiveFile = /(?:^|\/)(?:\.env(?:\.[^/]*)?|[^/]+\.env|id_(?:rsa|dsa|ecdsa|ed25519)[^/]*|[^/]+\.(?:pem|key)|\.npmrc|\.netrc|_netrc|\.pgpass|\.git-credentials|\.aws\/(?:credentials|sso\/cache\/[^/]+)|\.docker\/config\.json|\.kube\/config|\.config\/gcloud\/.+|\.azure\/.+)$/;
-/** Return the hook payload with tool content removed when it touches files outside `root` or credential files. */
+/** Return the hook payload with tool content removed when it touches files outside `root`, credential files or gitignored files. */
 export async function scopePayload(payload, cwd, root, withholdToolContent = false) {
     // Name-only attribution is allowed; neither a skill read's command/path nor its output is evidence.
     if (withholdToolContent)
@@ -69,28 +70,46 @@ function collect(value, key, paths) {
 }
 async function classify(paths, base, root) {
     let sensitive = false;
+    const inRoot = new Set();
+    let checks = 0;
     // Explicit file locators are checked even when the file does not exist yet (a Write).
     for (const path of paths.locators) {
+        if (++checks > MAX_PATH_CHECKS)
+            return OUT_OF_WORKSPACE;
         const absolute = resolve(base, expandHome(path));
         const real = await resolveReal(absolute);
         if (!isInside(real, root))
             return OUT_OF_WORKSPACE;
+        inRoot.add(real);
         sensitive ||= isSensitiveFile(absolute) || isSensitiveFile(real);
     }
     // Command arguments are only paths when they exist; `grep "/api/"` must not scope out an event.
     const mentions = [...new Set(paths.mentions)];
-    let checks = 0;
     for await (const absolute of mentionTargets(mentions, base)) {
         if (++checks > MAX_PATH_CHECKS)
             return OUT_OF_WORKSPACE;
         const real = await realpath(absolute).catch(() => null);
         if (real && !real.startsWith("/dev/") && !isInside(real, root))
             return OUT_OF_WORKSPACE;
+        if (real && isInside(real, root))
+            inRoot.add(real);
         sensitive ||= isSensitiveFile(absolute) || Boolean(real && isSensitiveFile(real));
     }
     // `cat .env*` names credential files even when nothing matches.
     sensitive ||= mentions.some((mention) => isSensitiveFile(mention) || isSensitiveFile(mention.replace(/[*?]/g, "")));
-    return sensitive ? SENSITIVE_FILE : null;
+    const ignored = inRoot.size > 0 && await hasIgnoredPaths([...inRoot], root);
+    return sensitive || ignored ? SENSITIVE_FILE : null;
+}
+// Plain check-ignore preserves tracked files even when they match an ignore rule.
+async function hasIgnoredPaths(paths, root) {
+    return new Promise((resolve) => {
+        const child = execFile("git", ["-C", root, "check-ignore", "--stdin", "-z"], { timeout: 1_000 }, (error, stdout) => {
+            // shortcut: unavailable Git leaves existing credential filtering in place; no extra evidence is recorded.
+            resolve(!error && stdout.length > 0);
+        });
+        child.stdin?.on("error", () => { });
+        child.stdin?.end(paths.join("\0") + "\0");
+    });
 }
 // Absolute paths a command may read. A glob yields the directory it lists and every match,
 // so a matched symlink cannot escape the root.
@@ -122,11 +141,12 @@ function dropContent(input, marker) {
 function commandArguments(command) {
     return shellCommands(command).flatMap((words) => pathWords(words.slice(words.findIndex((word) => !/^\w+=/.test(word)) + 1)));
 }
-// Arguments that look like paths; `--flag=path` is checked by its value.
+// Arguments that look like paths; `--flag=path` is checked by its value. A bare `name.ext` counts
+// too, so `cat secrets.json` is checked against .gitignore; only existing files are used.
 function pathWords(words) {
     return words.flatMap((token) => {
         const word = token.startsWith("-") ? token.slice(token.indexOf("=") + 1 || token.length) : token;
-        return word && !word.includes("://") && (/^[~./]/.test(word) || word.includes("/") || isSensitiveFile(word)) ? [word] : [];
+        return word && !word.includes("://") && (/^[~./]/.test(word) || word.includes("/") || /^[^\s/]+\.\w+$/.test(word) || isSensitiveFile(word)) ? [word] : [];
     });
 }
 // Split a script into simple commands of words, honoring quotes and backslash escapes.

@@ -4,7 +4,7 @@ import { ApiError, exchangeCode } from "./api.js";
 import { displayName } from "./agents/index.js";
 import { credentialFile, refreshState } from "./capture.js";
 import { deleteSecret, storeSecret } from "./keychain.js";
-import { parsePairingToken } from "./pairing-token.js";
+import { parsePairingToken, resolveApiOrigin } from "./pairing-token.js";
 import { replaceWithLock } from "./uploader.js";
 import { assertWritableDataDirectory, pairingDirectory, pairingKey, savePairing, updateState, workspaceRoot, } from "./workspace.js";
 /**
@@ -16,7 +16,7 @@ export function connectToken(prompt, commands) {
     if (typeof prompt !== "string" || !commands.length)
         return null;
     const command = commands.map((item) => item.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")).join("|");
-    return new RegExp(`^\\s{0,64}(?:${command})\\s{1,64}(ignsight1_[A-Za-z0-9_-]{1,4096})\\s{0,64}$`).exec(prompt)?.[1] ?? null;
+    return new RegExp(`^\\s{0,64}(?:${command})\\s{1,64}(ignsight1_[A-Za-z0-9_-]{1,4096}|[23456789ABCDEFGHJKMNPQRSTVWXYZ]{4}[- ]?[23456789ABCDEFGHJKMNPQRSTVWXYZ]{3})\\s{0,64}$`, "i").exec(prompt)?.[1] ?? null;
 }
 /**
  * Pair `directory` using a portal pairing token. `host` is the producer of the
@@ -24,7 +24,12 @@ export function connectToken(prompt, commands) {
  * unspent. Throws candidate-readable errors.
  */
 export async function pairWorkspace(token, directory, host) {
-    const { api, producer, code } = parsePairingToken(token);
+    const legacy = token.trim().startsWith("ignsight1_");
+    if (!legacy && !/^[23456789ABCDEFGHJKMNPQRSTVWXYZ]{4}[- ]?[23456789ABCDEFGHJKMNPQRSTVWXYZ]{3}$/i.test(token.trim()))
+        throw new Error("Invalid pairing code. Copy the 7-character code from the candidate portal.");
+    if (!legacy && !host)
+        throw new Error("Choose your coding agent with --agent <producer>.");
+    const { api, producer, code } = legacy ? parsePairingToken(token) : { api: resolveApiOrigin(), producer: host, code: token.replace(/[- ]/g, "").toUpperCase() };
     // Exchanging another agent's code would also revoke that agent's working credential.
     if (host && producer !== host)
         throw new Error(`This code is for ${displayName(producer)}, not ${displayName(host)}. Copy the ${displayName(host)} code from the candidate portal. The code was not used.`);

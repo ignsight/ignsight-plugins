@@ -1,11 +1,11 @@
 import { resolve } from "node:path";
 import { CaptureBuffer } from "./buffer.js";
 import { refreshState } from "./capture.js";
-import { connectCommands, displayName } from "./agents/index.js";
+import { agents, connectCommands, displayName } from "./agents/index.js";
 import { describeState, pairWorkspace } from "./pair.js";
 import { uploadWithLock } from "./uploader.js";
 import { isInside, listPairings, pairingDirectory, readState } from "./workspace.js";
-// `cli.js pair <pairing code> [--root <workspace>]`: pair this workspace with an attempt from a terminal.
+// `cli.js pair <pairing code> --agent <producer> [--root <workspace>]`: pair this workspace with an attempt from a terminal.
 //   Inside a coding agent, the UserPromptSubmit hook pairs instead (src/pair.ts).
 // `cli.js status [--root <workspace>] [--json] [--all]`: show the newest pairing per agent, or every pairing with --all.
 async function main() {
@@ -15,15 +15,20 @@ async function main() {
     if (rootIndex !== -1 && !rootOption)
         throw new Error("--root needs a directory");
     const directory = resolve(rootOption ?? process.cwd());
+    const agentIndex = args.indexOf("--agent");
+    const agentId = agentIndex < 0 ? undefined : args.splice(agentIndex, 2)[1];
+    const agent = agents.find((item) => item.producer === agentId);
+    if (command === "pair" && !agent && (agentIndex >= 0 || !args[0]?.startsWith("ignsight1_")))
+        throw new Error("Pairing requires --agent <producer> for a registered coding agent.");
     if (command === "pair" && args.length === 1)
-        await pair(args[0], directory);
+        await pair(args[0], directory, agent?.producer);
     else if (command === "status" && args.every((arg) => arg === "--json" || arg === "--all"))
         await status(directory, args.includes("--json"), args.includes("--all"));
     else
-        throw new Error("Usage: cli.js pair <pairing code> [--root <workspace>] | cli.js status [--root <workspace>] [--json] [--all]");
+        throw new Error("Usage: cli.js pair <pairing code> --agent <producer> [--root <workspace>] | cli.js status [--root <workspace>] [--json] [--all]");
 }
-async function pair(token, directory) {
-    const { lines, warning } = await pairWorkspace(token, directory);
+async function pair(token, directory, producer) {
+    const { lines, warning } = await pairWorkspace(token, directory, producer);
     for (const line of lines)
         console.log(line);
     if (warning)

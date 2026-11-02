@@ -1,7 +1,7 @@
 {
   "name": "ignsight",
   "displayName": "Ignsight",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "description": "Capture redacted assessment evidence from a coding agent",
   "author": {
     "name": "Ignsight"

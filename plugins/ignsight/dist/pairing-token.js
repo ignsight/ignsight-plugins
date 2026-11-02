@@ -1,7 +1,5 @@
-// The candidate portal shows one opaque pairing token per producer instead of a
-// separate API URL and code: `ignsight1_` + base64url(JSON {api, producer, code}).
-// The portal (apps/web) encodes it; the capture client decodes it.
-// The code inside is single use and expires within five minutes.
+// Short codes use the configured API; legacy tokens remain readable for one release.
+import { readFileSync } from "node:fs";
 import { agents } from "./agents/index.js";
 const PREFIX = "ignsight1_";
 const producers = new Set(agents.map((agent) => agent.producer));
@@ -39,4 +37,15 @@ export function apiOrigin(value) {
         throw new Error("The pairing code has an invalid API address.");
     }
     return `${url.origin}${url.pathname.replace(/\/+$/, "")}`;
+}
+export function resolveApiOrigin() {
+    if (process.env.IGNSIGHT_API_URL)
+        return apiOrigin(process.env.IGNSIGHT_API_URL);
+    try {
+        const config = JSON.parse(readFileSync(new URL("./config.json", import.meta.url), "utf8"));
+        if (typeof config === "object" && config !== null && "apiOrigin" in config && typeof config.apiOrigin === "string")
+            return apiOrigin(config.apiOrigin);
+    }
+    catch { /* Report missing package configuration below. */ }
+    throw new Error("The assessment API is not configured. Reinstall the plugin or set IGNSIGHT_API_URL.");
 }

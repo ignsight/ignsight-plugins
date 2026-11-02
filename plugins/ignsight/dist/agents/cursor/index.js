@@ -83,7 +83,8 @@ export const cursor = {
             return { usages: [] };
         return { usages: [{ kind: "mcp_tool", name: raw.tool_name, server: text(raw.mcp_server_name), trigger: "agent" }] };
     },
-    connectToken: (prompt) => typeof prompt === "string" ? /^\s{0,64}(ignsight1_[A-Za-z0-9_-]{1,4096})\s{0,64}$/.exec(prompt)?.[1] ?? null : null,
+    // Cursor can strip the connect command, leaving the bare code. Case-sensitive, so an ordinary word typed alone is not taken for a code.
+    connectToken: (prompt) => typeof prompt === "string" ? /^\s{0,64}(ignsight1_[A-Za-z0-9_-]{1,4096}|[2-9A-HJKMNP-TV-Z]{4}-?[2-9A-HJKMNP-TV-Z]{3})\s{0,64}$/.exec(prompt)?.[1] ?? null : null,
     toolKind: (name) => name === "Shell" ? "shell" : name === "Read" ? "read" : name === "Write" ? "write" : name === "StrReplace" ? "edit" : "other",
     shellOutcome({ response, error, failed }) {
         const result = isObject(response) ? response : {};
