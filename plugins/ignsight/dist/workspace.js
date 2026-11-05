@@ -114,5 +114,18 @@ async function ownerOnlyDirectory(path) {
 export async function writeJson(path, value) {
     const temporary = `${path}.${process.pid}.${Date.now()}.tmp`;
     await writeFile(temporary, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
-    await rename(temporary, path);
+    await renameWithRetry(temporary, path);
+}
+export async function renameWithRetry(source, target) {
+    for (let attempt = 0;; attempt++) {
+        try {
+            await rename(source, target);
+            return;
+        }
+        catch (error) {
+            if (attempt >= 5 || !(error instanceof Error && "code" in error && (error.code === "EPERM" || error.code === "EBUSY")))
+                throw error;
+            await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+    }
 }

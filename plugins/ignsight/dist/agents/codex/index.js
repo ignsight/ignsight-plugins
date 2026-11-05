@@ -1,8 +1,7 @@
 import { basename, dirname, resolve } from "node:path";
-import { homedir } from "node:os";
 import { isInside } from "../../workspace.js";
 import { isObject } from "../../trace/event.js";
-import { resolveReal, shellCommands } from "../../trace/scope.js";
+import { expandHome, resolveReal, shellCommands } from "../../trace/scope.js";
 import { count, counters, shortText, sumUsage } from "../../trace/usage.js";
 import { exitOutcome, parseSnakeCaseHook, sameNames, text } from "../snake-case-hook.js";
 // Codex adapter (hooks: https://developers.openai.com/codex/hooks).
@@ -43,16 +42,19 @@ function mcpParts(name) {
     return [server, name.slice(delimiter + 2)];
 }
 /** Unwrap shell argv without losing quoted script boundaries. Limit nested wrappers. */
-function readCommands(command, depth = 0) {
+function readCommands(command, depth = 0, windows = process.platform === "win32") {
     if (depth > 8)
         return [];
-    const commands = typeof command === "string" ? shellCommands(command)
+    const commands = typeof command === "string" ? shellCommands(command, windows || /^\s*(?:powershell|pwsh)(?:\.exe)?\s/i.test(command))
         : Array.isArray(command) && command.every((word) => typeof word === "string") ? [command] : [];
     return commands.flatMap((words) => {
-        if (!["bash", "zsh", "sh"].includes(basename(words[0] ?? "")))
+        const program = basename((words[0] ?? "").replaceAll("\\", "/")).replace(/\.exe$/i, "").toLowerCase();
+        if (!["bash", "zsh", "sh", "powershell", "pwsh"].includes(program))
             return [words];
-        const option = words.findIndex((word, index) => index > 0 && /^-[a-z]*c[a-z]*$/.test(word));
-        return option > 0 ? readCommands(words[option + 1], depth + 1) : [];
+        // PowerShell takes `-c`/`-Command`; POSIX shells may combine it with other flags (`-lc`).
+        const script = program === "powershell" || program === "pwsh" ? /^-(?:c|command)$/i : /^-[a-z]*c[a-z]*$/;
+        const option = words.findIndex((word, index) => index > 0 && script.test(word));
+        return option > 0 ? readCommands(words[option + 1], depth + 1, windows || program === "powershell" || program === "pwsh") : [];
     });
 }
 export const codex = {
@@ -84,18 +86,19 @@ export const codex = {
             const command = raw.tool_input.command ?? raw.tool_input.cmd;
             const base = typeof raw.tool_input.workdir === "string" ? resolve(input.cwd, raw.tool_input.workdir) : input.cwd;
             for (const words of readCommands(command)) {
-                if (!["cat", "sed", "nl", "head"].includes(words[0] ?? ""))
+                if (!["cat", "sed", "nl", "head", "get-content", "gc", "type"].includes((words[0] ?? "").toLowerCase()))
                     continue;
                 if (words[0] === "sed" && !(words[1] === "-n" && /^\d+(?:,\d+)?p$/.test(words[2] ?? "")))
                     continue;
                 if (words[0] === "nl" && words[1] !== "-ba")
                     continue;
                 for (const path of words.slice(1)) {
-                    if (basename(path) !== "SKILL.md")
+                    const normalized = path.replaceAll("\\", "/");
+                    if (basename(normalized) !== "SKILL.md")
                         continue;
-                    const expanded = path.replace(/^(?:~|\$HOME|\$\{HOME\})(?=\/|$)/, homedir());
+                    const expanded = expandHome(path);
                     const resolved = resolve(base, expanded);
-                    const plugin = /(?:^|\/)plugins\/cache\/[^/]+\/([^/]+)\/[^/]+\/skills\/([^/]+)\/SKILL\.md$/.exec(path);
+                    const plugin = /(?:^|\/)plugins\/cache\/[^/]+\/([^/]+)\/[^/]+\/skills\/([^/]+)\/SKILL\.md$/.exec(normalized);
                     const name = plugin?.[2] ?? basename(dirname(resolved));
                     if (!name)
                         continue;
@@ -170,4 +173,5 @@ export const codex = {
         };
     },
     blockPrompt: (message) => ({ decision: "block", reason: message }),
+    notice: (message) => ({ systemMessage: message }),
 };

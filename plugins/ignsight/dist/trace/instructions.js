@@ -1,5 +1,5 @@
 import { constants } from "node:fs";
-import { open, opendir, stat } from "node:fs/promises";
+import { lstat, open, opendir, stat } from "node:fs/promises";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { isInside } from "../workspace.js";
 import { MAX_STRING_LENGTH } from "./redact.js";
@@ -39,7 +39,7 @@ export async function instructionEvents(root) {
         }
         let content;
         try {
-            if (!(await stat(real)).isFile())
+            if ((await lstat(real)).isSymbolicLink() || !(await stat(real)).isFile())
                 return;
             const file = await open(real, constants.O_RDONLY | constants.O_NOFOLLOW);
             try {

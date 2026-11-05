@@ -1,5 +1,5 @@
 import { constants } from "node:fs";
-import { open, realpath, stat } from "node:fs/promises";
+import { lstat, open, realpath, stat } from "node:fs/promises";
 import { isObject } from "./event.js";
 import { isSensitiveFile } from "./scope.js";
 // Bounded, agent-neutral transcript reading. The agent's adapter supplies a
@@ -30,8 +30,10 @@ export async function readUsage(input, reader, previous) {
     const path = await realpath(input.transcriptPath).catch(() => null);
     if (!path || isSensitiveFile(input.transcriptPath) || isSensitiveFile(path))
         return {};
+    if ((await lstat(path).catch(() => null))?.isSymbolicLink())
+        return {};
     // Nonblocking open lets us reject FIFOs and devices without waiting for a producer.
-    const handle = await open(path, constants.O_RDONLY | constants.O_NONBLOCK).catch(() => null);
+    const handle = await open(path, constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW).catch(() => null);
     if (!handle)
         return {};
     try {

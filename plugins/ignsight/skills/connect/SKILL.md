@@ -12,6 +12,8 @@ Do not run any pairing command yourself and never print, store or reuse the
 code: a coding agent's sandbox can block the pairing store after the
 single-use code is spent.
 
+Run `node --version`. If Node.js is missing or older than 24, report "Node.js missing or older than 24" to the candidate and ask them to install Node.js 24 or newer.
+
 Tell the candidate, briefly:
 
 1. The Ignsight plugin's hooks did not run. In Codex, open `/hooks` and trust

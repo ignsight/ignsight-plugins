@@ -47,6 +47,8 @@ export async function deleteSecret(account, fallbackFile) {
         throw new Error("Could not remove the capture credential from the keychain.");
 }
 async function keychainSecret(account) {
+    if (process.platform !== "darwin" && process.platform !== "linux")
+        throw new Error("no supported keychain");
     const output = process.platform === "darwin"
         ? await run("security", ["find-generic-password", "-s", SERVICE, "-a", account, "-w"])
         : await run("secret-tool", ["lookup", "service", SERVICE, "account", account]);

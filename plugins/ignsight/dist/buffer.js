@@ -1,9 +1,9 @@
-import { chmod, mkdir, open, readFile, readdir, rename, stat, unlink } from "node:fs/promises";
+import { chmod, mkdir, open, readFile, readdir, stat, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { validCursor } from "./trace/usage.js";
 import { withFileLock } from "./file-lock.js";
 import { assertSafeSessionId } from "./trace/event.js";
-import { writeJson } from "./workspace.js";
+import { renameWithRetry, writeJson } from "./workspace.js";
 // Owner-only local upload buffer (directories 0700, files 0600):
 //   sessions/<id>/events.jsonl: canonical events, including an acknowledged prefix.
 //   sessions/<id>/session.json: BatchSession and durable bookkeeping below.
@@ -288,7 +288,7 @@ export class CaptureBuffer {
                 await source.close();
                 await target.close();
             }
-            await rename(temporary, path);
+            await renameWithRetry(temporary, path);
         }
         record.file_bytes = size - offset;
         record.acknowledged_offset = 0;

@@ -21,14 +21,14 @@ export async function refreshState(pairing, timeoutMs = 10_000) {
         return cached;
     const credential = await credentialFor(pairing);
     if (!credential)
-        return updateState(pairing.key, { state: "expired", checked_at: new Date().toISOString(), last_error: "The credential is missing from the keychain. Pair again." });
+        return { ...await updateState(pairing.key, { state: "expired", checked_at: new Date().toISOString(), last_error: "The credential is missing from the keychain. Pair again." }), reason: "credential_missing" };
     try {
         const status = await producerStatus(pairing.api_url, pairing.producer, credential, timeoutMs);
         return updateState(pairing.key, { state: status.state, checked_at: new Date().toISOString(), expires_at: status.expires_at });
     }
     catch (error) {
         if (error instanceof ApiError && error.status === 401) {
-            return updateState(pairing.key, { state: "expired", checked_at: new Date().toISOString(), last_error: "The API no longer recognizes this pairing. Pair again." });
+            return { ...await updateState(pairing.key, { state: "expired", checked_at: new Date().toISOString(), last_error: "The API no longer recognizes this pairing. Pair again." }), reason: "credential_revoked" };
         }
         throw error;
     }
@@ -38,7 +38,7 @@ export async function refreshState(pairing, timeoutMs = 10_000) {
  * capture adds no latency during the attempt; any other state is re-checked
  * (bounded by `timeoutMs`) so the first prompt after the attempt starts is kept.
  */
-export async function captureState(pairing, timeoutMs, now = Date.now()) {
+export async function captureState(pairing, timeoutMs, now = Date.now(), report) {
     const cached = await readState(pairing.key);
     if (cached.state === "ended")
         return "expired";
@@ -50,12 +50,19 @@ export async function captureState(pairing, timeoutMs, now = Date.now()) {
     if (cached.state === "active" && cached.checked_at && now - Date.parse(cached.checked_at) < ACTIVE_TTL_MS)
         return "active";
     try {
-        const state = (await refreshState(pairing, timeoutMs)).state;
+        const refreshed = await refreshState(pairing, timeoutMs);
+        if (cached.state === "active" && refreshed.reason)
+            report?.(refreshed.reason);
+        const state = refreshed.state;
         if (state === "expired")
             await spawnUploader(pairing);
         return state === "ended" ? "expired" : state;
     }
-    catch {
+    catch (error) {
+        if (error instanceof Error && "code" in error && ["EACCES", "EPERM", "EROFS"].includes(String(error.code)))
+            throw error;
+        if (cached.state !== "active")
+            report?.("api_unreachable");
         return cached.state === "active" ? "active" : null;
     } // Offline during an attempt: keep buffering.
 }

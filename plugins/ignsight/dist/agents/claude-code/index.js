@@ -173,4 +173,5 @@ export const claudeCode = {
         };
     },
     blockPrompt: (message) => ({ continue: false, stopReason: message }),
+    notice: (message) => ({ systemMessage: message }),
 };

@@ -7,7 +7,7 @@ export function testRunner(command) {
         let index = 0;
         while (words[index] && /^\w+=/.test(words[index]))
             index++;
-        const program = basename(words[index] ?? "");
+        const program = basename((words[index] ?? "").replaceAll("\\", "/")).replace(/\.(?:cmd|exe|bat|ps1)$/i, "");
         const args = words.slice(index + 1);
         if (["pytest", "vitest", "jest", "mocha", "rspec", "phpunit"].includes(program))
             return program;
@@ -20,7 +20,7 @@ export function testRunner(command) {
         if (["npm", "pnpm", "yarn", "bun"].includes(program) && (args[0] === "test" || args[0] === "run" && args[1] === "test"))
             return program;
         if (["npx", "pnpm", "yarn", "bun"].includes(program)) {
-            const executable = args[0] === "exec" ? args[1] : args[0];
+            const executable = (args[0] === "exec" ? args[1] : args[0])?.replace(/\.(?:cmd|exe|bat|ps1)$/i, "");
             if (executable && ["vitest", "jest", "mocha", "pytest", "rspec", "phpunit"].includes(executable))
                 return executable;
         }

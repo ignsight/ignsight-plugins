@@ -228,12 +228,16 @@ async function acquire(lock) {
     for (let attempt = 0; attempt < 2; attempt++) {
         try {
             const handle = await open(lock, "wx", 0o600);
-            await handle.writeFile(String(process.pid));
-            await handle.close();
+            try {
+                await handle.writeFile(String(process.pid));
+            }
+            finally {
+                await handle.close();
+            }
             return true;
         }
         catch (error) {
-            if (!(error instanceof Error && "code" in error && error.code === "EEXIST"))
+            if (!(error instanceof Error && "code" in error && (error.code === "EEXIST" || process.platform === "win32" && (error.code === "EPERM" || error.code === "EACCES"))))
                 throw error;
             const owner = await readFile(lock, "utf8").catch(() => "");
             const pid = Number(owner.split(":")[0]);
@@ -270,7 +274,7 @@ export async function spawnUploader(pairing) {
         if (!await acquire(lock))
             return;
         try {
-            const child = spawn(process.execPath, [fileURLToPath(new URL("./upload.js", import.meta.url)), pairing.key], { detached: true, stdio: "ignore" });
+            const child = spawn(process.execPath, [fileURLToPath(new URL("./upload.js", import.meta.url)), pairing.key], { detached: true, windowsHide: true, stdio: "ignore" });
             await new Promise((resolve, reject) => { child.once("spawn", resolve); child.once("error", reject); });
             const handle = await open(lock, "w", 0o600);
             try {

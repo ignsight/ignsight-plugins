@@ -8,13 +8,20 @@ import { setTimeout } from "node:timers/promises";
 export async function withFileLock(path, action) {
     const deadline = Date.now() + 2400;
     let handle;
+    let missing = 0;
     while (!handle) {
         try {
             handle = await open(path, "wx", 0o600);
             await handle.writeFile(String(process.pid));
         }
         catch (error) {
-            if (!(error instanceof Error && "code" in error && error.code === "EEXIST"))
+            const code = error instanceof Error && "code" in error ? error.code : undefined;
+            // Windows reports a lock file pending deletion as EPERM/EACCES. With no lock file there
+            // (twice, to allow for that deletion finishing), it is a real permission error.
+            const windowsDenied = process.platform === "win32" && (code === "EPERM" || code === "EACCES");
+            if (windowsDenied && !await stat(path).then(() => true, (statError) => statError.code !== "ENOENT") && ++missing > 1)
+                throw error;
+            if (code !== "EEXIST" && !windowsDenied)
                 throw error;
             const current = await stat(path).catch(() => null);
             if (current && Date.now() - current.mtimeMs > 2000) {
@@ -29,7 +36,8 @@ export async function withFileLock(path, action) {
                         alive = error instanceof Error && "code" in error && error.code === "EPERM";
                     }
                 }
-                if (!alive)
+                // Unlink only the stale file itself, never a lock another waiter has just reclaimed.
+                if (!alive && (await stat(path).catch(() => null))?.ino === current.ino)
                     await unlink(path).catch(() => { });
             }
             if (Date.now() >= deadline)
@@ -43,8 +51,9 @@ export async function withFileLock(path, action) {
     finally {
         // A stale owner must not remove a replacement owner's lock.
         const current = await stat(path).catch(() => null);
-        if (current?.ino === (await handle.stat()).ino)
-            await unlink(path).catch(() => { });
+        const owned = current?.ino === (await handle.stat()).ino;
         await handle.close();
+        if (owned)
+            await unlink(path).catch(() => { });
     }
 }

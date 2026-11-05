@@ -3,20 +3,24 @@ name: status
 description: Show whether Ignsight capture is paired and active for this workspace.
 ---
 
-Show the Ignsight capture status for the current workspace. Claude Code
-substitutes `${CLAUDE_PLUGIN_ROOT}` below with the installed plugin root. In
-Cursor, use `node "${CURSOR_PLUGIN_ROOT}/dist/cli.js" status`. In
-Codex, use the directory that contains this skill's `skills/` folder.
+Show the Ignsight capture status for the current workspace. Claude Code uses:
 
 ```sh
 node "${CLAUDE_PLUGIN_ROOT}/dist/cli.js" status
 ```
 
-The command only reads the pairing store, so it works inside a sandbox. In
+Codex uses `${PLUGIN_ROOT}` - the directory containing this skill's `skills/`
+folder. Cursor uses `${CURSOR_PLUGIN_ROOT}`. For either, run the same command
+with its respective placeholder in place of `${CLAUDE_PLUGIN_ROOT}`. If the
+placeholder has not already been replaced in the text you see, write the
+absolute plugin root path yourself. On Windows PowerShell or cmd, never use
+`$VAR`, `$env:` or `%VAR%`; use the absolute path.
+
+The command checks the pairing store and data directory. In
 Codex it may report that it could not finish ending an attempt; that is
 expected and the cached state is still accurate.
 
-Report the output verbatim: producer, workspace root, attempt ID, state
+Report the Checks block and the output verbatim: producer, workspace root, attempt ID, state
 (`paired`, `waiting for the test to start`, `capturing`, or `ended at <time>`),
 valid until, last successful upload, buffered count, credential storage and
 last error. If capture has ended, include the end reason and uploaded and
